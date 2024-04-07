@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<mapper namespace="NotifyMapper">
+
+    <select id ="SelectAllNotify">
+        select *
+        from app_notify
+        where sub_id = {UserId}
+          and del = 0
+    </select>
+
+    <insert id="InsertNotify">
+        insert into app_notify(id, pub_id, sub_id, title, msg_type, text)
+        values ({Id}, {PubId}, {SubId}, {Title}, {MsgType}, {Text})
+    </insert>
+
+</mapper>
