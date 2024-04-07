@@ -1,7 +1,7 @@
 package control
 
 import (
-	"github.com/jimu-server/logger/logger"
+	"github.com/jimu-server/logger"
 	"github.com/jimu-server/notify/mapper"
 )
 
