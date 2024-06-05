@@ -12,7 +12,9 @@ import (
 	"github.com/jimu-server/model"
 	"github.com/jimu-server/mq/mq_key"
 	"github.com/jimu-server/mq/rabbmq"
+	"github.com/jimu-server/notify/control/args"
 	"github.com/jimu-server/util/uuidutils/uuid"
+	"github.com/jimu-server/web"
 	jsoniter "github.com/json-iterator/go"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"net/http"
@@ -38,6 +40,58 @@ func Test(c *gin.Context) {
 	rabbmq.Notify(data)
 }
 
+// Clear
+// @Summary 	获取字典信息
+// @Description 获取字典信息
+// @Tags 		管理系统
+// @Accept 		json
+// @Produces 	json
+// @Router 		/api/dictionary [get]
+func Clear(c *gin.Context) {
+	token := c.MustGet(auth.Key).(*auth.Token)
+	var err error
+	params := map[string]any{
+		"UserId": token.Id,
+	}
+	if err = NotifyMapper.ClearNotify(params); err != nil {
+		c.JSON(500, resp.Error(err, resp.Msg("清空通知失败")))
+		return
+	}
+	c.JSON(200, resp.Success(nil, resp.Msg("清空通知成功")))
+}
+
+func Read(c *gin.Context) {
+	token := c.MustGet(auth.Key).(*auth.Token)
+	var err error
+	var req *args.NotifyArgs
+	web.BindJSON(c, &req)
+	params := map[string]any{
+		"UserId": token.Id,
+		"Id":     req.Id,
+	}
+	if err = NotifyMapper.ReadNotify(params); err != nil {
+		c.JSON(500, resp.Error(err, resp.Msg("阅读通知失败")))
+		return
+	}
+	c.JSON(200, resp.Success(nil, resp.Msg("阅读通知成功")))
+}
+
+func Delete(c *gin.Context) {
+	token := c.MustGet(auth.Key).(*auth.Token)
+	var err error
+	var req *args.NotifyArgs
+	web.BindJSON(c, &req)
+	params := map[string]any{
+		"UserId": token.Id,
+		"Id":     req.Id,
+	}
+	if err = NotifyMapper.DeleteNotify(params); err != nil {
+		c.JSON(500, resp.Error(err, resp.Msg("删除通知失败")))
+		return
+	}
+	c.JSON(200, resp.Success(nil, resp.Msg("删除通知成功")))
+}
+
 func NotifyPull(c *gin.Context) {
 	token := c.MustGet(auth.Key).(*auth.Token)
 	var err error
@@ -46,7 +100,7 @@ func NotifyPull(c *gin.Context) {
 	}
 	var notify []*model.AppNotify
 	if notify, err = NotifyMapper.SelectAllNotify(params); err != nil {
-		c.JSON(http.StatusInternalServerError, resp.Error(err, resp.Msg("获取通知失败")))
+		c.JSON(500, resp.Error(err, resp.Msg("获取通知失败")))
 		return
 	}
 	c.JSON(http.StatusOK, resp.Success(notify, resp.Msg("获取通知成功")))
@@ -66,7 +120,6 @@ func Notify(c *gin.Context) {
 		logs.Error("upgrade:" + err.Error())
 		return
 	}
-	defer con.Close()
 	openNotify(con, token)
 }
 func openNotify(con *websocket.Conn, token *auth.Token) {
@@ -77,7 +130,18 @@ func openNotify(con *websocket.Conn, token *auth.Token) {
 		logs.Error(err.Error())
 		return
 	}
-	defer ch.Close()
+	defer func(ch *amqp.Channel) {
+		err := ch.Close()
+		if err != nil {
+			panic(err)
+		}
+	}(ch)
+	defer func(con *websocket.Conn) {
+		err := con.Close()
+		if err != nil {
+			panic(err)
+		}
+	}(con)
 
 	var msgs <-chan amqp.Delivery
 	msgs, err = ch.Consume(
@@ -97,13 +161,30 @@ func openNotify(con *websocket.Conn, token *auth.Token) {
 
 	// 每 5 s 检查一次
 	go func() {
-		ticker := time.NewTicker(time.Second * 5)
+		logs.Info("ws,ping start")
+		ticker := time.NewTicker(time.Second * 2)
 		for range ticker.C {
 			if err := con.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(time.Second)); err != nil {
 				logs.Error("ws,ping error:" + err.Error())
 				cancel()
 				return
 			}
+		}
+	}()
+
+	// 读取消息
+	go func() {
+		for {
+			t, message, err := con.ReadMessage()
+			if err != nil {
+				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					logs.Error("Unexpected close error: " + err.Error())
+				} else {
+					logs.Error("Read error: " + err.Error())
+				}
+				break
+			}
+			logs.Info(fmt.Sprintf("Received message: %s (type)%d", message, t))
 		}
 	}()
 
@@ -132,9 +213,14 @@ func openNotify(con *websocket.Conn, token *auth.Token) {
 				tx.Rollback()
 				return
 			}
-			msg.Ack(false)
+
+			if err = msg.Ack(false); err != nil {
+				logs.Error("mq,ack error:" + err.Error())
+				return
+			}
 			tx.Commit()
 		case <-ctx.Done():
+			logs.Warn("ws,close : " + key)
 			return
 		}
 	}

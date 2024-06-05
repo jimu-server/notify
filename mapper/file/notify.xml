@@ -5,12 +5,30 @@
         select *
         from app_notify
         where sub_id = {UserId}
-          and del = 0
+          and is_delete = 0
     </select>
 
     <insert id="InsertNotify">
-        insert into app_notify(id, pub_id, sub_id, title, msg_type, text)
-        values ({Id}, {PubId}, {SubId}, {Title}, {MsgType}, {Text})
+        insert into app_notify(id, pub_id, sub_id, title, msg_type, text, template, param)
+        values ({Id}, {PubId}, {SubId}, {Title}, {MsgType}, {Text}, {Template}, {Param})
     </insert>
+
+    <update id ="ClearNotify">
+        update app_notify set is_delete=1 where sub_id= {UserId}
+    </update>
+
+    <update id="ReadNotify">
+        update app_notify
+        set status=1
+        where sub_id = {UserId}
+          and id = {Id}
+    </update>
+
+    <update id="DeleteNotify">
+        update app_notify
+        set is_delete=1
+        where sub_id = {UserId}
+          and id = {Id}
+    </update>
 
 </mapper>
